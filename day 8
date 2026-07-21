@@ -1,0 +1,260 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import corner
+import emcee
+
+df = pd.read_csv("C:/java/Dwarf_05.csv")
+df.loc[df['vr'] == 999.0, 'vr'] = 0.0
+df.loc[df['d_vr'] == 999.0, 'd_vr'] = 9999.0
+df = df.dropna(subset=['X_pc','Y_pc'])
+x_pc = df['X_pc'].values
+y_pc = df['Y_pc'].values
+vr = df['vr'].values
+d_vr = df['d_vr'].values
+
+def vr_log_likelihood(theta,x,y,v_r,d_vr):
+    xc, yc, sigma_x, sigma_y, alpha_rad, \
+    muvrdw, sigmavr_dw, muvrmk, sigmavr_mk, f = theta
+    cosa=np.cos(alpha_rad)
+    sina=np.sin(alpha_rad)
+    dx=x-xc
+    dy=y-yc
+    x_rot=dx*cosa+dy*sina
+    y_rot=dy*cosa-dx*sina
+    log_ndw_2d = (-0.5*(x_rot**2/sigma_x**2+y_rot**2/sigma_y**2)-np.log(2*np.pi*sigma_x*sigma_y))
+    bg=1/(10000*10000)
+    log_nmw_2d=np.log(bg)
+    sigma_dw_total=np.sqrt(sigmavr_dw**2+d_vr**2)
+    sigma_mw_total=np.sqrt(sigmavr_mk**2+d_vr**2)
+    log_ndw_vr = (-0.5*(v_r-muvrdw)**2/sigma_dw_total**2-np.log(np.sqrt(2*np.pi)*sigma_dw_total))
+    log_nmw_vr = (-0.5*(v_r-muvrmk)**2/sigma_mw_total**2-np.log(np.sqrt(2*np.pi)*sigma_mw_total))
+
+    log_gdw = log_ndw_2d + log_ndw_vr
+    log_gmw = log_nmw_2d + log_nmw_vr
+    gdw=np.exp(log_gdw)
+    gmw=np.exp(log_gmw)
+    p_i = f*gdw+(1-f)*gmw
+    return np.sum(np.log(p_i+1e-300))
+
+def log_prior(theta):
+    xc,yc,sigma_x,sigma_y,alpha_rad,\
+    muvrdw,sigmavr_dw,muvrmk,sigmavr_mk,f=theta
+    if not (-500 < xc <500):
+        return -np.inf
+    if not (-500 < yc <500):
+        return -np.inf
+    if not (0 < sigma_x <1000):
+        return -np.inf
+    if not (0 < sigma_y <1000):
+        return -np.inf
+    if not (0 < alpha_rad < np.pi/2):
+        return -np.inf
+    if not (-300<muvrdw<300):
+        return -np.inf
+    if not (0<sigmavr_dw<40):
+        return -np.inf
+    if not (-100<muvrmk<100):
+        return -np.inf
+    if not (20<sigmavr_mk<60):
+        return -np.inf
+    if not (0<f<1):
+        return -np.inf
+    return 0.0
+
+
+def log_prob(theta):
+    lp=log_prior(theta)
+    if not np.isfinite(lp):
+        return -np.inf
+    return lp + vr_log_likelihood(
+        theta,
+        x_pc,
+        y_pc,
+        vr,
+        d_vr
+    )
+
+
+print("Start MCMC")
+
+ndim=10
+nwalkers=40
+nsteps=20000
+burn_in=1000
+
+initial_guess=np.array([0,0,200,200,np.pi/6,-100,10,0,40,0.3])
+step_size=np.array([2,2,1,1,0.05,3,2,1,0.5,0.01])
+
+pos = initial_guess + step_size*np.random.randn(nwalkers,ndim)
+sampler=emcee.EnsembleSampler(nwalkers,ndim,log_prob)
+sampler.run_mcmc(pos,nsteps,progress=True)
+print("MCMC finished")
+print("Mean acceptance = ",np.mean(sampler.acceptance_fraction))
+
+samples=sampler.get_chain(
+    discard=burn_in,
+    thin=2,
+    flat=True
+)
+print("number of samples:",len(samples))
+
+best_params=np.median(samples,axis=0)
+print("\nBest parameters")
+
+names=["xc","yc","sigma_x","sigma_y","alpha","muvrdw","sigmavr_dw","muvrmk","sigmavr_mk","f"]
+
+for i,n in enumerate(names):
+    print(n,"=",best_params[i])
+print("\nSaving MCMC chain...")
+
+
+n_save = 2000
+random_index = np.random.choice(
+    len(samples),
+    n_save,
+    replace=False
+)
+chain_save = samples[random_index]
+np.savetxt(
+    "Dwarf_02_10D_MCMC_chain.txt",
+    chain_save,
+    fmt="%.6e"
+)
+print("✓ saved Dwarf_%05_10D_MCMC_chain_DDN.txt")
+
+
+labels=[r"$x_c$",r"$y_c$",r"$\sigma_x$",r"$\sigma_y$",r"$\alpha$",r"$\mu_{v,dw}$",r"$\sigma_{v,dw}$",r"$\mu_{v,mw}$",r"$\sigma_{v,mw}$",r"$f$"]
+
+fig=corner.corner(
+    samples,
+    labels=labels,
+    truths=best_params,
+    quantiles=[0.16,0.5,0.84],
+    show_titles=True,
+    figsize=(14,14)
+)
+plt.savefig(
+    "corner_plot.png",
+    dpi=300,
+    bbox_inches="tight"
+)
+plt.show()
+print("✓ corner plot saved")
+
+print("\nCalculating membership probability...")
+
+prob_list=[]
+
+for theta in chain_save:
+    xc,yc,sigma_x,sigma_y,alpha_rad,\
+    muvrdw,sigmavr_dw,muvrmk,sigmavr_mk,f = theta
+    
+    cosa=np.cos(alpha_rad)
+    sina=np.sin(alpha_rad)
+
+    dx=x_pc-xc
+    dy=y_pc-yc
+
+    x_rot=dx*cosa+dy*sina
+    y_rot=dy*cosa-dx*sina
+
+    log_dw_sp=(-0.5*( x_rot**2/sigma_x**2 +y_rot**2/sigma_y**2)- np.log(2*np.pi*sigma_x*sigma_y))
+
+    log_mw_sp=np.log(1/(10000*10000))
+
+    sigma_dw_total=np.sqrt(sigmavr_dw**2+d_vr**2)
+    sigma_mw_total=np.sqrt(sigmavr_mk**2+d_vr**2)
+
+    log_dw_v=(-0.5* (vr-muvrdw)**2/sigma_dw_total**2-np.log(np.sqrt(2*np.pi)*sigma_dw_total))
+    log_mw_v=(-0.5*(vr-muvrmk)**2/sigma_mw_total**2-np.log(np.sqrt(2*np.pi)*sigma_mw_total))
+
+    gdw=np.exp(log_dw_sp+log_dw_v)
+    gmw=np.exp(log_mw_sp+log_mw_v)
+
+    p=(f*gdw/(f*gdw+(1-f)*gmw+1e-300))
+    prob_list.append(p)
+
+p_dwarf=np.mean( prob_list,axis=0)
+print("✓ membership finished")
+
+
+result_df=pd.DataFrame({"X_pc":x_pc,"Y_pc":y_pc,"vr":vr,"prob_dwarf":p_dwarf})
+result_df.to_csv("membership_with_vr.csv",index=False)
+print("✓ membership_with_vr.csv saved")
+
+
+threshold=0.8
+high_prob=result_df[result_df["prob_dwarf"]>threshold]
+
+high_prob.to_csv("high_confidence_members.csv",index=False)
+print("High probability members:",len(high_prob))
+
+fig,axes=plt.subplots(2,2,figsize=(12,10))
+
+ax=axes[0,0]
+
+sc=ax.scatter(
+    x_pc,
+    y_pc,
+    c=p_dwarf,
+    s=10,
+    cmap="coolwarm",
+    vmin=0,
+    vmax=1
+)
+
+ax.set_xlabel("X_pc")
+ax.set_ylabel("Y_pc")
+ax.set_title("Spatial membership probability")
+ax.axis("equal")
+plt.colorbar(sc,ax=ax)
+
+ax=axes[0,1]
+
+ax.scatter(
+    x_pc,
+    vr,
+    c=p_dwarf,
+    s=10,
+    cmap="coolwarm",
+    vmin=0,
+    vmax=1
+)
+
+ax.set_xlabel("X_pc")
+ax.set_ylabel("vr")
+ax.set_title("Velocity membership probability")
+
+
+ax=axes[1,0]
+ax.hist(p_dwarf,bins=50)
+ax.axvline(0.8,linestyle="--")
+ax.set_xlabel("membership probability")
+ax.set_ylabel("number")
+
+ax=axes[1,1]
+
+member=p_dwarf>0.5
+
+ax.hist(
+    vr[member],
+    bins=30,
+    alpha=0.6,
+    label="dwarf"
+)
+
+ax.hist(
+    vr[~member],
+    bins=30,
+    alpha=0.6,
+    label="MW"
+)
+
+ax.set_xlabel("vr")
+ax.set_ylabel("number")
+ax.legend()
+plt.tight_layout()
+plt.savefig("membership_analysis.png",dpi=300)
+
+plt.show()
