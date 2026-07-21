@@ -1,0 +1,120 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import gridspec
+
+df = pd.read_csv("C:/java/tst.csv")
+table_data = {}
+n = len(df) 
+vr = df['vr'].dropna()
+sumi=0
+for i in np.arange(-400,-300,0.2):
+    table_data[i] = {}
+    for j in np.arange(1,12,0.2):
+        log_pdf_each = -0.5 * np.log(2 * np.pi) - np.log(j) - (vr - i)**2 / (2 * j**2)
+        logL = log_pdf_each.sum() 
+        table_data[i][j] = logL    
+        
+v_mean_grid = sorted(table_data.keys())
+sigma_grid = sorted(table_data[v_mean_grid[0]].keys())
+
+logL_2d = np.zeros((len(sigma_grid), len(v_mean_grid)))
+for i_idx, v_mean in enumerate(v_mean_grid):
+    for j_idx, sigma in enumerate(sigma_grid):
+        logL_2d[j_idx, i_idx] = table_data[v_mean][sigma]
+
+logL_max = np.max(logL_2d)
+max_idx = np.unravel_index(np.argmax(logL_2d), logL_2d.shape)
+best_sigma = sigma_grid[max_idx[0]]
+best_vmean = v_mean_grid[max_idx[1]]
+
+relL_2d = np.exp(logL_2d - logL_max)
+
+print(f"最优: v̄={best_vmean:.2f}, σ_v={best_sigma:.2f}")
+
+mask = relL_2d > 0.001
+row_has_data = np.any(mask, axis=1)
+col_has_data = np.any(mask, axis=0)
+
+row_indices = np.where(row_has_data)[0]
+col_indices = np.where(col_has_data)[0]
+
+row_start = max(0, row_indices[0] - 2)
+row_end = min(len(sigma_grid), row_indices[-1] + 3)
+col_start = max(0, col_indices[0] - 2)
+col_end = min(len(v_mean_grid), col_indices[-1] + 3)
+v_mean_trimmed = v_mean_grid[col_start:col_end]
+sigma_trimmed = sigma_grid[row_start:row_end]
+logL_trimmed = logL_2d[row_start:row_end, col_start:col_end]
+relL_trimmed = relL_2d[row_start:row_end, col_start:col_end]
+
+print(f"v_mean 范围: {v_mean_trimmed[0]:.1f} 到 {v_mean_trimmed[-1]:.1f}")
+print(f"sigma 范围: {sigma_trimmed[0]:.1f} 到 {sigma_trimmed[-1]:.1f}")
+
+
+X, Y = np.meshgrid(v_mean_trimmed, sigma_trimmed)
+fig = plt.figure(figsize=(13, 10)) 
+gs = gridspec.GridSpec(
+    nrows=2, ncols=2,
+    width_ratios=[1, 4],
+    height_ratios=[1, 4],
+    wspace=0.002,   
+    hspace=0.002    
+)
+
+ax_main = fig.add_subplot(gs[1, 1])       # 右下主热力图（先创建）
+ax_marg_y = fig.add_subplot(gs[1, 0], sharey=ax_main) # 左侧共享主图Y
+ax_marg_x = fig.add_subplot(gs[0, 1], sharex=ax_main) # 上方共享主图X
+
+levels = np.linspace(0, 1, 50)
+contour_filled = ax_main.contourf(X, Y, relL_trimmed, levels=levels, cmap='viridis')
+
+cbar_ax = fig.add_axes([0.94, 0.12, 0.022, 0.76])
+cbar = fig.colorbar(contour_filled, cax=cbar_ax)
+cbar.set_label('Relative Likelihood')
+
+contour_lines = ax_main.contour(X, Y, relL_trimmed, 
+                              levels=[0.01, 0.05, 0.1, 0.3, 0.5, 0.7, 0.9],
+                              colors='white', linewidths=0.8, alpha=0.6)
+ax_main.clabel(contour_lines, inline=True, fontsize=8, fmt='%.2f')
+
+ax_main.scatter(best_vmean, best_sigma, c='red', marker='x', s=120, linewidths=3,
+            label=f'ML: v̄={best_vmean:.2f}, σ_v={best_sigma:.2f}')
+
+ax_main.set_xlabel(r'Mean velocity $\bar{v}$ (km s$^{-1}$)', fontsize=13)
+ax_main.set_ylabel(r'Velocity dispersion $\sigma_v$ (km s$^{-1}$)', fontsize=13)
+
+ax_main.set_title('Likelihood Contour (zoomed)', fontsize=14)
+ax_main.legend(fontsize=11, loc="upper right")
+ax_main.grid(True, alpha=0.3, linestyle='--')
+
+
+x_min, x_max = ax_main.get_xlim()
+y_min, y_max = ax_main.get_ylim()
+ax_marg_x.set_xlim(x_min, x_max)
+ax_marg_y.set_ylim(y_min, y_max)
+
+
+marginal_v = relL_trimmed.sum(axis=0)
+ax_marg_x.plot(v_mean_trimmed, marginal_v, color="#1f77b4", linewidth=2)
+ax_marg_x.fill_between(v_mean_trimmed, marginal_v, alpha=0.2, color="#1f77b4")
+ax_marg_x.axvline(best_vmean, color="red", linestyle="--", alpha=0.7)
+ax_marg_x.set_title("Marginal Likelihood of Mean Velocity")
+ax_marg_x.set_ylabel("Marginal Relative Likelihood")
+ax_marg_x.grid(alpha=0.3)
+ax_marg_x.tick_params(axis='x', labelbottom=False)
+
+
+
+marginal_sig = relL_trimmed.sum(axis=1)
+ax_marg_y.plot(marginal_sig, sigma_trimmed, color="#ff7f0e", linewidth=2)
+ax_marg_y.fill_betweenx(sigma_trimmed, marginal_sig, alpha=0.2, color="#ff7f0e")
+ax_marg_y.axhline(best_sigma, color="red", linestyle="--", alpha=0.7)
+ax_marg_y.set_xlabel("Marginal Relative Likelihood")
+ax_marg_y.invert_xaxis()
+ax_marg_y.grid(alpha=0.3)
+ax_marg_y.tick_params(axis='y', labelleft=False)
+
+plt.savefig('C:/java/contour_zood_auto.png', dpi=300, bbox_inches='tight')
+plt.show()
+print("✅ 已保存: C:/java/contour_zood_auto.png")
