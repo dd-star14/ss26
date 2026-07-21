@@ -1,0 +1,104 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+data_file = "Dwarf_10.csv"
+chain_file = "C:/java/Dwarf_%10_10D_MCMC_chain_DDN.txt"  
+
+df = pd.read_csv(data_file)
+x = df["X_pc"].values
+y = df["Y_pc"].values
+
+chain = pd.read_csv(
+    chain_file,
+    sep=r"\s+",
+    comment="#",
+    header=None
+)
+chain = chain.iloc[:, :10]
+chain.columns = [
+    "xc", "yc", "sigma_x", "sigma_y", "alpha",
+    "muvrdw", "sigmavr_dw", "muvrmk", "sigmavr_mk", "f"
+]
+
+print(chain.head())
+
+burn_fraction = 0
+burn = int(len(chain) * burn_fraction)
+
+posterior = chain.iloc[burn:]
+
+print("Total chain length:", len(chain))
+print("Posterior samples:", len(posterior))
+
+
+sigma_x_samples = posterior["sigma_x"].values
+sigma_y_samples = posterior["sigma_y"].values
+
+
+rh_samples = 1.1774 * np.sqrt(sigma_x_samples * sigma_y_samples)  
+
+rh_median = np.median(rh_samples)                               
+rh_16 = np.percentile(rh_samples, 16)                           
+rh_84 = np.percentile(rh_samples, 84)                            
+rh_err_minus = rh_median - rh_16                                 
+rh_err_plus = rh_84 - rh_median                                  
+
+
+sigma_chain = posterior["sigmavr_dw"].values
+
+sigma16 = np.percentile(sigma_chain, 16)
+sigma50 = np.percentile(sigma_chain, 50)
+sigma84 = np.percentile(sigma_chain, 84)
+err_minus = sigma50 - sigma16
+err_plus = sigma84 - sigma50
+
+print("Dwarf 02 Final Result")
+print(f"rh = {rh_median:.3f} + {rh_err_plus:.3f} - {rh_err_minus:.3f} pc")  # <--- 修改
+print(rf"$\sigma_{{vr,dg}}$ = {sigma50:.3f} + {err_plus:.3f} - {err_minus:.3f} km/s")
+
+
+
+result = pd.DataFrame({
+    "Dwarf": [2],
+
+    "rh_median_pc": [rh_median],           
+    "rh_err_minus": [rh_err_minus],       
+    "rh_err_plus": [rh_err_plus],         
+    "sigma_vr_dg": [sigma50],
+    "sigma_err_minus": [err_minus],       
+    "sigma_err_plus": [err_plus]          
+})
+
+result.to_csv( "Dwarf_02_final_result.csv", index=False)
+print("\nSaved:")
+print("Dwarf_02_final_result.csv")
+
+plt.figure(figsize=(12, 5))
+
+
+plt.subplot(1, 2, 1)                      
+plt.hist(sigma_chain, bins=50, density=True, color='steelblue', edgecolor='white')
+plt.axvline(sigma16, linestyle="--", color='gray', label="16%")
+plt.axvline(sigma50, linewidth=2, color='red', label="median")
+plt.axvline(sigma84, linestyle="--", color='gray', label="84%")
+plt.xlabel(r"$\sigma_{vr,dg}$ (km/s)")
+plt.ylabel("Posterior density")
+plt.title("Dwarf 02: Velocity Dispersion")
+plt.legend()
+
+plt.subplot(1, 2, 2)                                 
+plt.hist(rh_samples, bins=50, density=True, color='darkorange', edgecolor='white')
+plt.axvline(rh_16, linestyle="--", color='gray', label="16%")
+plt.axvline(rh_median, linewidth=2, color='red', label="median")
+plt.axvline(rh_84, linestyle="--", color='gray', label="84%")
+plt.xlabel(r"$r_h$ (pc)")
+plt.ylabel("Posterior density")
+plt.title("Dwarf 02: Half-light Radius")
+plt.legend()
+
+plt.tight_layout()
+plt.savefig("Dwarf_02_posterior.png", dpi=300, bbox_inches="tight") 
+plt.show()
+
+print("\nPlot saved: Dwarf_02_posterior.png")  
