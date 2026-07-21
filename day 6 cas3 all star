@@ -1,0 +1,266 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+df = pd.read_csv("C:/java/Cas3_total.csv")
+vr = df['vr'].dropna()
+n = len(vr)
+print("Number of stars =", n)
+def log_likelihood(
+        vr_dw,
+        sigma_dw,
+        vr_MW,
+        sigma_MW,
+        f):
+    if sigma_dw <= 0:
+        return -np.inf
+    if sigma_MW <= 0:
+        return -np.inf
+    if f <= 0 or f >= 1:
+        return -np.inf
+    if vr_dw >= -150:
+        return -np.inf
+    if vr_MW <= -150:
+        return -np.inf
+    dwarf_pdf = (1/(np.sqrt(2*np.pi)*sigma_dw)*np.exp(-(vr-vr_dw)**2/(2*sigma_dw**2)))
+    MW_pdf = (
+        1/(np.sqrt(2*np.pi)*sigma_MW)
+        *
+        np.exp(
+            -(vr-vr_MW)**2
+            /
+            (2*sigma_MW**2)
+        )
+    )
+    total_pdf = (
+        f*dwarf_pdf
+        +
+        (1-f)*MW_pdf
+    )
+    if np.any(total_pdf <= 0):
+        return -np.inf
+    logL = np.log(total_pdf).sum()
+    return logL
+vr_dw_current = -370
+sigma_dw_current = 10
+vr_MW_current = -50
+sigma_MW_current = 50
+f_current = 0.3
+logL_current = log_likelihood(
+    vr_dw_current,
+    sigma_dw_current,
+    vr_MW_current,
+    sigma_MW_current,
+    f_current
+)
+print("Initial logL =",logL_current)
+num_steps = 100000
+delta_vr_dw = 2
+delta_sigma_dw = 1
+delta_vr_MW = 5
+delta_sigma_MW = 5
+delta_f = 0.02
+chain_vr_dw = np.zeros(num_steps)
+chain_sigma_dw = np.zeros(num_steps)
+chain_vr_MW = np.zeros(num_steps)
+chain_sigma_MW = np.zeros(num_steps)
+chain_f = np.zeros(num_steps)
+chain_logL = np.zeros(num_steps)
+accept_count = 0
+for i in range(num_steps):
+    chain_vr_dw[i] = vr_dw_current
+    chain_sigma_dw[i] = sigma_dw_current
+    chain_vr_MW[i] = vr_MW_current
+    chain_sigma_MW[i] = sigma_MW_current
+    chain_f[i] = f_current
+    chain_logL[i] = logL_current
+    vr_dw_new = np.random.normal(
+        vr_dw_current,
+        delta_vr_dw
+    )
+    sigma_dw_new = np.random.normal(
+        sigma_dw_current,
+        delta_sigma_dw
+    )
+    vr_MW_new = np.random.normal(
+        vr_MW_current,
+        delta_vr_MW
+    )
+    sigma_MW_new = np.random.normal(
+        sigma_MW_current,
+        delta_sigma_MW
+    )
+    f_new = np.random.normal(
+        f_current,
+        delta_f
+    )
+    logL_new = log_likelihood(
+        vr_dw_new,
+        sigma_dw_new,
+        vr_MW_new,
+        sigma_MW_new,
+        f_new
+    )
+    if logL_new == -np.inf:
+        continue
+    ratio = np.exp(logL_new-logL_current)
+    if logL_new > logL_current:
+        accept = True
+    else:
+        random_number = np.random.uniform(0,1)
+        if random_number < ratio:
+            accept = True
+        else:
+            accept = False
+    if accept:
+        vr_dw_current = vr_dw_new
+        sigma_dw_current = sigma_dw_new
+        vr_MW_current = vr_MW_new
+        sigma_MW_current = sigma_MW_new
+        f_current = f_new
+        logL_current = logL_new
+        accept_count += 1
+acceptance_rate = accept_count/num_steps
+print( "Acceptance rate =",acceptance_rate)
+burn_in = int(num_steps*0.1)
+vr_dw_chain = chain_vr_dw[burn_in:]
+sigma_dw_chain = chain_sigma_dw[burn_in:]
+vr_MW_chain = chain_vr_MW[burn_in:]
+sigma_MW_chain = chain_sigma_MW[burn_in:]
+f_chain = chain_f[burn_in:]
+logL_chain = chain_logL[burn_in:]
+chain = pd.DataFrame(
+    {
+        "vr_dw":vr_dw_chain,
+        "sigma_dw":sigma_dw_chain,
+        "vr_MW":vr_MW_chain,
+        "sigma_MW":sigma_MW_chain,
+        "f":f_chain,
+        "logL":logL_chain
+    }
+)
+chain.to_csv(
+    "Cas3_5parameter_MCMC_chain.txt",
+    index=False
+)
+print("5 parameter chain saved")
+parameters = {
+    "vr_dw":vr_dw_chain,
+    "sigma_dw":sigma_dw_chain,
+    "vr_MW":vr_MW_chain,
+    "sigma_MW":sigma_MW_chain,
+    "f":f_chain
+}
+for name,data in parameters.items():
+    p16,p50,p84=np.percentile(
+        data,
+        [16,50,84]
+    )
+    print(
+        name,
+        "=",
+        f"{p50:.3f} +{p84-p50:.3f} -{p50-p16:.3f}"
+    )
+for name,data in parameters.items():
+    p16,p50,p84=np.percentile(
+        data,
+        [16,50,84]
+    )
+    plt.figure(figsize=(8,5))
+    plt.hist(
+        data,
+        bins=60,
+        alpha=0.6
+    )
+    plt.axvline(
+        p50,
+        linestyle="--",
+        label=f"median={p50:.3f}"
+    )
+    plt.xlabel(name)
+    plt.ylabel("sample number")
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.show()
+plt.figure(figsize=(8,7))
+plt.scatter(
+    vr_dw_chain,
+    sigma_dw_chain,
+    c=np.arange(len(vr_dw_chain)),
+    cmap="jet",
+    s=5
+)
+plt.xlabel(r"$v_{r,dw}$")
+plt.ylabel(r"$\sigma_{dw}$")
+cbar=plt.colorbar()
+cbar.set_label("Iteration")
+plt.grid(alpha=0.3)
+plt.show()
+r_hchain = np.loadtxt("C:/java/CasIII_rh_chain.txt")
+num_rh = len(r_hchain)
+mu_mean = 24.45
+mu_sp = 0.14
+mu_sample = np.random.normal(
+    loc=mu_mean,
+    scale=mu_sp,
+    size=num_rh
+)
+D_pc = 10**((mu_sample+5)/5)
+arcmin = np.pi/(180*60)
+theta_rad = (r_hchain*arcmin)
+rh_pc = (D_pc*theta_rad)
+sigma_sample = np.random.choice(sigma_dw_chain,size=num_rh)
+M_dyn = (580*rh_pc *sigma_sample**2)
+log_Mdyn = np.log10(M_dyn)
+p16,p50,p84 = np.percentile(log_Mdyn,[16,50,84])
+print(
+    "log(Mdyn) =",
+    f"{p50:.3f}",
+    f"+{p84-p50:.3f}",
+    f"-{p50-p16:.3f}"
+)
+log_Mstar = 6.6
+plt.figure(figsize=(9,5))
+plt.hist(
+    log_Mdyn,
+    bins=60,
+    alpha=0.6,
+    label=r"$M_{dyn}$"
+)
+plt.axvline(
+    p50,
+    linestyle="--",
+    linewidth=2,
+    label=f"median={p50:.2f}"
+)
+plt.axvline(
+    p16,
+    linestyle=":",
+    linewidth=1.5
+)
+plt.axvline(
+    p84,
+    linestyle=":",
+    linewidth=1.5
+)
+plt.axvline(
+    log_Mstar,
+    color="red",
+    linewidth=2,
+    label=r"$\log M_*=6.6$"
+)
+plt.xlabel(r"$\log_{10}(M/M_\odot)$")
+plt.ylabel("sample number")
+plt.legend()
+plt.grid(alpha=0.3)
+plt.show()
+Mdyn_chain = pd.DataFrame(
+    {
+        "rh_pc":rh_pc,
+        "sigma_dw":sigma_sample,
+        "M_dyn":M_dyn,
+        "log_Mdyn":log_Mdyn
+    }
+)
+Mdyn_chain.to_csv( "Cas3_5parameter_Mdyn_chain.txt",index=False)
+print("Mdyn chain saved")
