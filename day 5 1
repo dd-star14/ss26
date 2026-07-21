@@ -1,0 +1,73 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+
+
+df = pd.read_csv("C:/java/Cas3_total.csv")
+r_hchain=np.loadtxt("C:/java/CasIII_rh_chain.txt")
+num_rh=len(r_hchain)
+mu_mean=24.45
+mu_sp=0.14
+mu_sample = np.random.normal(loc=mu_mean, scale=mu_sp, size=num_rh)
+arcmin=np.pi/(180*60)
+D_pc = 10 ** ((mu_sample+5) / 5 )
+theta_rad = r_hchain* arcmin
+rh_pc = D_pc * theta_rad
+vr = df[df['P(member)']==1]['vr'].dropna()
+n = len(vr)
+table_data = {}
+step = 0.1
+vr_min, vr_max = -400, -360
+sigma_min, sigma_max = 1, 20
+vr_range = np.linspace(vr_min, vr_max, int((vr_max - vr_min)/step) + 1)
+sigma_range = np.linspace(sigma_min, sigma_max, int((sigma_max - sigma_min)/step) + 1)
+for i in vr_range:
+    key_i = round(i, 2)
+    table_data[key_i] = {}
+    for j in sigma_range: 
+        key_j=round(j,2)
+        log_pdf_each = (-0.5*np.log(2*np.pi)-np.log(j)-(vr-i)**2/(2*j**2))
+        logL = log_pdf_each.sum()
+        table_data[key_i][key_j] = logL 
+
+vr_list = np.array(list(table_data.keys()))
+sig_list = np.array(list(table_data[vr_list[0]].keys()))
+logL_grid = np.zeros((len(vr_list), len(sig_list)))
+for i, v in enumerate(vr_list):
+    for j, s in enumerate(sig_list):
+        logL_grid[i,j] = table_data[v][s]
+
+
+vr_mesh, sig_mesh = np.meshgrid(vr_list, sig_list, indexing="ij")
+L_grid = np.exp(logL_grid)
+prob_2d = L_grid / np.sum(L_grid)     
+sig_flat = sig_mesh.flatten()
+prob_flat = prob_2d.flatten()
+
+sample_idx = np.random.choice(len(sig_flat), size=num_rh, p=prob_flat)
+sigma_sample = sig_flat[sample_idx] 
+M_dyn = 580 * rh_pc * (sigma_sample ** 2)
+log_Mdyn = np.log10(M_dyn)
+log_Mstar = 6.6
+plt.figure(figsize=(9,5))
+plt.hist(log_Mdyn, bins=60, alpha=0.6, label=r"$M_{\rm dyn}$ ")
+p16, p50, p84 = np.percentile(log_Mdyn, [16, 50, 84])
+plt.axvline(p50, c="blue", linestyle="--", lw=2, label=f"medium log$M_{{dyn}}$ = {p50:.2f}")
+plt.axvline(p16, c="blue", linestyle=":", lw=1.5, alpha=0.7, label=f"1σ [{p16:.2f}, {p84:.2f}]")
+plt.axvline(p84, c="blue", linestyle=":", lw=1.5, alpha=0.7)
+plt.axvline(log_Mstar, c="red", lw=2, label=f"log$M_*$={log_Mstar}+-0.3")
+plt.xlabel(r"$\log_{10}(M/M_\odot)$")
+plt.ylabel("样本数")
+plt.tick_params(axis='y', labelleft=False)
+plt.legend(loc='upper left')
+plt.grid(alpha=0.3)
+plt.show()
+
+p16, p50, p84 = np.percentile(log_Mdyn, [16,50,84])
+print(f"动力学质量中位数 logMdyn = {p50:.2f}")
+print(f"1σ置信区间 [{p16:.2f}, {p84:.2f}]")
+print(f"恒星固定质量 logM* = {log_Mstar}")
+
+
