@@ -1,0 +1,130 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+
+data = pd.read_csv("dwarfs_meanrh_sigma_dw.txt", comment='#')
+data.columns = ['dwarf', 'best_rh', 'best_sigma_dw', 'un_sigma_dw']
+
+dwarf_id = data['dwarf'].values
+rh = data['best_rh'].values
+sigma_dw = data['best_sigma_dw'].values
+sigma_err = data['un_sigma_dw'].values
+
+def linear_func(x, a, b):
+    return a * x + b
+
+popt, pcov = curve_fit(linear_func, rh, sigma_dw)
+a, b = popt
+a_err, b_err = np.sqrt(np.diag(pcov))
+
+print("Linear Fit Results (without error weighting)")
+print(f"斜率 a = {a:.4f} ± {a_err:.4f} km/s/pc")
+print(f"截距 b = {b:.4f} ± {b_err:.4f} km/s")
+print(f"方程: sigma_dw = {a:.4f} * rh + {b:.4f}")
+
+def weighted_linear_func(x, a, b):
+    return a * x + b
+
+
+weights = 1.0 / (sigma_err**2 + 1e-10)  
+
+popt_w, pcov_w = curve_fit(weighted_linear_func, rh, sigma_dw, sigma=sigma_err, absolute_sigma=True)
+a_w, b_w = popt_w
+a_err_w, b_err_w = np.sqrt(np.diag(pcov_w))
+
+print("Linear Fit Results (with error weighting)")
+print(f"斜率 a = {a_w:.4f} ± {a_err_w:.4f} km/s/pc")
+print(f"截距 b = {b_w:.4f} ± {b_err_w:.4f} km/s")
+print(f"方程: sigma_dw = {a_w:.4f} * rh + {b_w:.4f}")
+
+residuals = sigma_dw - linear_func(rh, a, b)
+ss_res = np.sum(residuals**2)
+ss_tot = np.sum((sigma_dw - np.mean(sigma_dw))**2)
+r2 = 1 - (ss_res / ss_tot)
+
+residuals_w = sigma_dw - linear_func(rh, a_w, b_w)
+ss_res_w = np.sum(residuals_w**2)
+r2_w = 1 - (ss_res_w / ss_tot)
+
+print(f"\nR² (unweighted) = {r2:.4f}")
+print(f"R² (weighted)   = {r2_w:.4f}")
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+ax1 = axes[0]
+
+ax1.errorbar(
+    rh, sigma_dw,
+    xerr=None, 
+    yerr=sigma_err,
+    fmt='o',
+    color='steelblue',
+    ecolor='gray',
+    elinewidth=1.5,
+    capsize=3,
+    markersize=8,
+    label='Data'
+)
+
+rh_fit = np.linspace(rh.min() - 20, rh.max() + 20, 100)
+sigma_fit = linear_func(rh_fit, a, b)
+ax1.plot(rh_fit, sigma_fit, 'r-', linewidth=2, label=f'Fit: y = {a:.3f}x + {b:.2f}')
+
+ax1.text(
+    0.05, 0.95,
+    f'R² = {r2:.3f}',
+    transform=ax1.transAxes,
+    fontsize=12,
+    verticalalignment='top',
+    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
+)
+
+ax1.set_xlabel(r'$r_h$ (pc)', fontsize=12)
+ax1.set_ylabel(r'$\sigma_{vr,dw}$ (km/s)', fontsize=12)
+ax1.set_title('Unweighted Linear Fit', fontsize=14)
+ax1.legend(loc='lower right')
+ax1.grid(True, alpha=0.3)
+ax2 = axes[1]
+ax2.errorbar(
+    rh, sigma_dw,
+    yerr=sigma_err,
+    fmt='o',
+    color='darkorange',
+    ecolor='gray',
+    elinewidth=1.5,
+    capsize=3,
+    markersize=8,
+    label='Data'
+)
+sigma_fit_w = linear_func(rh_fit, a_w, b_w)
+ax2.plot(rh_fit, sigma_fit_w, 'r-', linewidth=2, label=f'Fit: y = {a_w:.3f}x + {b_w:.2f}')
+
+ax2.text(
+    0.05, 0.95,
+    f'R² = {r2_w:.3f}',
+    transform=ax2.transAxes,
+    fontsize=12,
+    verticalalignment='top',
+    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
+)
+ax2.set_xlabel(r'$r_h$ (pc)', fontsize=12)
+ax2.set_ylabel(r'$\sigma_{vr,dw}$ (km/s)', fontsize=12)
+ax2.set_title('Weighted Linear Fit (with errors)', fontsize=14)
+ax2.legend(loc='lower right')
+ax2.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('rh_vs_sigma_fit.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+fit_result = pd.DataFrame({
+    'method': ['unweighted', 'weighted'],
+    'slope': [a, a_w],
+    'slope_err': [a_err, a_err_w],
+    'intercept': [b, b_w],
+    'intercept_err': [b_err, b_err_w],
+    'R2': [r2, r2_w]
+})
+fit_result.to_csv('rh_vs_sigma_fit_params.csv', index=False)
+print("\nFit parameters saved to: rh_vs_sigma_fit_params.csv")
